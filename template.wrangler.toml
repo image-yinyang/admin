@@ -1,0 +1,31 @@
+name = "yinyang-admin"
+main = "src/index.js"
+compatibility_date = "2023-12-06"
+compatibility_flags = [ "nodejs_compat" ]
+
+account_id = ""
+workers_dev = true
+
+[[kv_namespaces]]
+id = ""
+binding = "CommonKVStore"
+preview_id = ""
+
+[[kv_namespaces]]
+id = ""
+binding = "ConfigKVStore"
+preview_id = ""
+
+[[kv_namespaces]]
+id = ""
+binding = "RequestsKVStore"
+preview_id = ""
+
+[[kv_namespaces]]
+id = ""
+binding = "BasicAuthKVStore"
+
+[[d1_databases]]
+binding = "DB"
+database_name = ""
+database_id = ""

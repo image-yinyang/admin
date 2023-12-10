@@ -18,7 +18,10 @@ async function query(env, request) {
 		const { results, success } = await env.DB.prepare('select distinct InputUrl from ByInputUrl;').all();
 		if (success) {
 			return (
-				`<div id="distinctInputUrls-div"><h2>${results.length} distinct input images</h2>` +
+				`
+				<div id="distinctInputUrls">
+				<div id="distinctInputUrls-div">
+				<h2>${results.length} distinct input images</h2>` +
 				results
 					.reverse()
 					.map(
@@ -29,7 +32,7 @@ async function query(env, request) {
 							`<img src="${InputUrl}" /></button></form>`,
 					)
 					.join('\n') +
-				'</div>'
+				'</div></div>'
 			);
 		}
 	}
@@ -61,15 +64,80 @@ async function distinctInputUrl(env, request) {
 		.filter((e) => !!e);
 
 	return (
-		`<img src="${formData.InputUrl}" style="width: 192px;"/><br/><br/>\n` +
+		`<div style="margin: 2em;"><img src="${formData.InputUrl}" style="width: 192px;"/></div>\n` +
 		kvResults
 			.map(
-				({ results: { good, bad } }) =>
-					`<div><img style="border: 1px solid black; margin: 0.3em;" src="${IMG_HOST}/${bad.imageBucketId}">` +
-					`<img style="border: 1px solid white; margin: 0.3em;" src="${IMG_HOST}/${good.imageBucketId}"></div>`,
+				({ createdTimeUnixMs, input: { thresholdMod }, results: { good, bad }, meta: { openai_tokens_used } }) =>
+					`<div><div>` +
+					`<img style="border: 1px solid black; margin: 0.3em;" src="${IMG_HOST}/${bad.imageBucketId}">` +
+					`<img style="border: 1px solid white; margin: 0.3em;" src="${IMG_HOST}/${good.imageBucketId}">` +
+					`</div><div style="margin-bottom: 1em;">` +
+					(thresholdMod != 0 ? `Threshold modifier: ${thresholdMod}<br/>` : '') +
+					`${openai_tokens_used} tokens @ ${new Date(createdTimeUnixMs).toISOString()}` +
+					'</div>',
 			)
 			.join('\n')
 	);
+}
+
+// unique reqIds with either/or failure:
+// select distinct g.RequestId as RequestId, g.Error as GoodError, b.Error as BadError from GenImgResult g inner join GenImgResult b where b.RequestId = g.RequestId and g.Error is not null or b.Error is not null;
+
+const igsCountQueries = {
+	'image generations': 'select count(*) as count from GenImgResult;',
+	'with a failure': 'select count(distinct RequestId) as count from GenImgResult where Error is not null;',
+	'with a "good" failure': "select count(distinct RequestId) as count from GenImgResult where Error is not null and ImageType = 'good';",
+	'with a "bad" failure': "select count(distinct RequestId) as count from GenImgResult where Error is not null and ImageType = 'bad';",
+};
+
+const igsAvgMinMaxQueries = {
+	'all image prompt lengths':
+		'select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult;',
+	'<span style="color: darkgreen;">successful</span> image prompt lengths':
+		'select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where Error is null;',
+	'<span style="color: maroon;">failed</span> image prompt lengths':
+		'select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where Error is not null;',
+	'all "good" image prompt lengths':
+		"select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where ImageType = 'good';",
+	'<span style="color: darkgreen;">successful</span> "good" image prompt lengths':
+		"select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where ImageType = 'good' and Error is null;",
+	'<span style="color: maroon;">failed</span> "good" image prompt lengths':
+		"select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where ImageType = 'good' and Error is not null;",
+	'all "bad" image prompt lengths':
+		"select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where ImageType = 'bad';",
+	'<span style="color: darkgreen;">successful</span> "bad" image prompt lengths':
+		"select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where ImageType = 'bad' and Error is null;",
+	'<span style="color: maroon;">failed</span> "bad" image prompt lengths':
+		"select avg(length(Prompt)) as Avg, max(length(Prompt)) as Max, min(length(Prompt)) as Min from GenImgResult where ImageType = 'bad' and Error is not null;",
+};
+
+async function imageGenStats(env, request) {
+	return (
+		await Promise.all(
+			Object.entries(igsCountQueries).map(async ([qName, query]) => {
+				const {
+					results: [{ count }],
+				} = await env.DB.prepare(query).all();
+				return `<div><h4 style="margin-bottom: 0.1em;">Total ${qName}:</h4>${count}</div>`;
+			}),
+		)
+	)
+		.concat(
+			await Promise.all(
+				Object.entries(igsAvgMinMaxQueries).map(async ([qName, query]) => {
+					const {
+						results: [{ Avg, Min, Max }],
+					} = await env.DB.prepare(query).all();
+					return `
+				<div>
+					<h4 style="margin-bottom: 0.1em;">Avg/Min/Max of ${qName}:</h4>
+					${Avg} / ${Min} / ${Max}
+				</div>
+				`;
+				}),
+			),
+		)
+		.join('\n');
 }
 
 async function checkAuth(env, request) {
@@ -96,6 +164,20 @@ async function checkAllowedHost(env, origin, request) {
 	}
 }
 
+async function uiIndex(request) {
+	return `
+    <div id="uiIndex">
+        <button hx-get="${ADMIN_API_HOST}/q/distinctInputUrls" hx-swap="outerHTML" hx-target="#uiIndex">
+            Load distinct input images
+        </button>
+		<br/>
+        <button hx-get="${ADMIN_API_HOST}/q/imageGenStats" hx-swap="outerHTML" hx-target="#uiIndex">
+            Image generation stats
+        </button>
+    </div>
+	`;
+}
+
 export default {
 	async fetch(request, env) {
 		const origin = request.headers.get('origin');
@@ -110,10 +192,18 @@ export default {
 			.all('*', checkAllowedHost.bind(null, env, origin))
 			.all('*', preflight)
 			.all('*', checkAuth.bind(null, env))
+			.get('/ui-index', uiIndex)
 			.get('/q/:qName', query.bind(null, env))
+			.get('/q/imageGenStats', imageGenStats.bind(null, env))
 			.post('/q/distinctInputUrl', distinctInputUrl.bind(null, env))
 			.all('*', () => error(404));
 
-		return router.handle(request).then(html).catch(error).then(corsify);
+		const ourError = (...args) => {
+			console.error('Router middleware threw:');
+			console.error(...args);
+			return error(...args);
+		};
+
+		return router.handle(request).then(html).catch(ourError).then(corsify);
 	},
 };

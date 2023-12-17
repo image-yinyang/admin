@@ -9,6 +9,7 @@ function _logWithCfInfo(method, request, ...args) {
 const logWithCfInfo = _logWithCfInfo.bind(null, 'log');
 const warnWithCfInfo = _logWithCfInfo.bind(null, 'warn');
 
+const MAIN_HOST = 'https://yinyang.computerpho.be';
 const ADMIN_API_HOST = 'https://api.admin.yinyang.computerpho.be';
 const IMG_HOST = 'https://images.yinyang.computerpho.be';
 
@@ -67,13 +68,16 @@ async function distinctInputUrl(env, request) {
 		`<div style="margin: 2em;"><img src="${formData.InputUrl}" style="width: 192px;"/></div>\n` +
 		kvResults
 			.map(
-				({ createdTimeUnixMs, input: { thresholdMod }, results: { good, bad }, meta: { openai_tokens_used } }) =>
+				({ createdTimeUnixMs, requestId, input: { thresholdMod }, results: { good, bad }, meta: { openai_tokens_used } }) =>
 					`<div><div>` +
 					`<img style="border: 1px solid black; margin: 0.3em;" src="${IMG_HOST}/${bad.imageBucketId}">` +
 					`<img style="border: 1px solid white; margin: 0.3em;" src="${IMG_HOST}/${good.imageBucketId}">` +
 					`</div><div style="margin-bottom: 1em;">` +
 					(thresholdMod != 0 ? `Threshold modifier: ${thresholdMod}<br/>` : '') +
-					`${openai_tokens_used} tokens @ ${new Date(createdTimeUnixMs).toISOString()}` +
+					`${openai_tokens_used} tokens @ <a href="${MAIN_HOST}/?req=${requestId}" target="_blank">` +
+					`${new Date(createdTimeUnixMs).toISOString()}</a>` +
+					'<br/>' +
+					`Prompt byte lengths: good=${good.prompt.length}, bad=${bad.prompt.length}` +
 					'</div>',
 			)
 			.join('\n')
@@ -182,7 +186,7 @@ export default {
 	async fetch(request, env) {
 		const origin = request.headers.get('origin');
 		const { preflight, corsify } = createCors({
-			methods: ['GET'],
+			methods: ['GET', 'POST'],
 			origins: [origin],
 		});
 

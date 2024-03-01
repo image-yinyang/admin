@@ -12,49 +12,15 @@ const warnWithCfInfo = _logWithCfInfo.bind(null, 'warn');
 const MAIN_HOST = 'https://yinyang.computerpho.be';
 const ADMIN_API_HOST = 'https://api.admin.yinyang.computerpho.be';
 const IMG_HOST = 'https://images.yinyang.computerpho.be';
+const INPUTS_HOST = 'https://inputs.yinyang.computerpho.be';
 
 async function _distinctInputUrls(env) {
-	const { results, success } = await env.DB.prepare('select distinct InputUrl from ByInputUrl;').all();
+	const { results, success } = await env.DB.prepare('select distinct InputUrl, RequestId from ByInputUrl;').all();
 	if (success) {
 		return results.reverse();
 	}
 
 	return null;
-}
-
-async function findChains(env, request) {
-	logWithCfInfo(request, 'findChains');
-	const inputUrls = await _distinctInputUrls(env);
-	if (inputUrls) {
-		const uniqueOutputs = {};
-		const ourInputs = {};
-		// serialize
-		for (const { InputUrl, RequestId } of inputUrls) {
-			inputUrls[RequestId] = await JSON.parse(await env.RequestsKVStore.get(RequestId));
-			const { results } = inputUrls[RequestId];
-
-			if (InputUrl.indexOf(IMG_HOST) === 0) {
-				if (!ourInputs[InputUrl]) {
-					ourInputs[InputUrl] = [];
-				}
-
-				ourInputs[InputUrl].push(RequestId);
-			}
-
-			const _uoCheck = (which) => {
-				if (!uniqueOutputs[results[which].imageBucketId]) {
-					uniqueOutputs[results[which].imageBucketId] = [];
-				}
-
-				uniqueOutputs[results[which].imageBucketId].push([RequestId, which]);
-			};
-
-			_uoCheck('good');
-			_uoCheck('bad');
-		}
-	}
-
-	return JSON.stringify({ uniqueOutputs, ourInputs });
 }
 
 async function query(env, request) {
@@ -125,6 +91,48 @@ async function distinctInputUrl(env, request) {
 			)
 			.join('\n')
 	);
+}
+
+async function findChains(env, request) {
+	logWithCfInfo(request, 'findChains');
+	const inputUrls = await _distinctInputUrls(env);
+	const uniqueOutputs = {};
+	const ourInputs = {};
+
+	if (inputUrls) {
+		// serialize
+		for (const { InputUrl, RequestId } of inputUrls) {
+			inputUrls[RequestId] = await JSON.parse(await env.RequestsKVStore.get(RequestId));
+			if (!inputUrls[RequestId]) {
+				console.error(`Request ${RequestId} not found!?`);
+				continue;
+			}
+
+			const { results } = inputUrls[RequestId];
+
+			if (InputUrl.indexOf(IMG_HOST) === 0 || InputUrl.indexOf(INPUTS_HOST) === 0) {
+				if (!ourInputs[InputUrl]) {
+					ourInputs[InputUrl] = [];
+				}
+
+				ourInputs[InputUrl].push(RequestId);
+			}
+
+			const _uoCheck = (which) => {
+				if (!uniqueOutputs[results[which].imageBucketId]) {
+					uniqueOutputs[results[which].imageBucketId] = [];
+				}
+
+				uniqueOutputs[results[which].imageBucketId].push([RequestId, which]);
+			};
+
+			_uoCheck('good');
+			_uoCheck('bad');
+		}
+	}
+
+	console.log('findChaings done!')
+	return JSON.stringify({ uniqueOutputs, ourInputs });
 }
 
 // unique reqIds with either/or failure:
@@ -218,6 +226,10 @@ async function uiIndex(request) {
             Load distinct input images
         </button>
 		<br/>
+        <button hx-get="${ADMIN_API_HOST}/findChains" hx-swap="outerHTML" hx-target="#uiIndex">
+            Find chains
+        </button>
+		<br/>
         <button hx-get="${ADMIN_API_HOST}/q/imageGenStats" hx-swap="outerHTML" hx-target="#uiIndex">
             Image generation stats
         </button>
@@ -243,7 +255,7 @@ export default {
 			.get('/q/:qName', query.bind(null, env))
 			.get('/q/imageGenStats', imageGenStats.bind(null, env))
 			.post('/q/distinctInputUrl', distinctInputUrl.bind(null, env))
-			.get('/q/findChains', findChains.bind(null, env))
+			.get('/findChains', findChains.bind(null, env))
 			.all('*', () => error(404));
 
 		const ourError = (...args) => {

@@ -13,18 +13,61 @@ const MAIN_HOST = 'https://yinyang.computerpho.be';
 const ADMIN_API_HOST = 'https://api.admin.yinyang.computerpho.be';
 const IMG_HOST = 'https://images.yinyang.computerpho.be';
 
+async function _distinctInputUrls(env) {
+	const { results, success } = await env.DB.prepare('select distinct InputUrl from ByInputUrl;').all();
+	if (success) {
+		return results.reverse();
+	}
+
+	return null;
+}
+
+async function findChains(env, request) {
+	logWithCfInfo(request, 'findChains');
+	const inputUrls = await _distinctInputUrls(env);
+	if (inputUrls) {
+		const uniqueOutputs = {};
+		const ourInputs = {};
+		// serialize
+		for (const { InputUrl, RequestId } of inputUrls) {
+			inputUrls[RequestId] = await JSON.parse(await env.RequestsKVStore.get(RequestId));
+			const { results } = inputUrls[RequestId];
+
+			if (InputUrl.indexOf(IMG_HOST) === 0) {
+				if (!ourInputs[InputUrl]) {
+					ourInputs[InputUrl] = [];
+				}
+
+				ourInputs[InputUrl].push(RequestId);
+			}
+
+			const _uoCheck = (which) => {
+				if (!uniqueOutputs[results[which].imageBucketId]) {
+					uniqueOutputs[results[which].imageBucketId] = [];
+				}
+
+				uniqueOutputs[results[which].imageBucketId].push([RequestId, which]);
+			};
+
+			_uoCheck('good');
+			_uoCheck('bad');
+		}
+	}
+
+	return JSON.stringify({ uniqueOutputs, ourInputs });
+}
+
 async function query(env, request) {
 	logWithCfInfo(request, `query name: ${request.params.qName}`);
 	if (request.params.qName === 'distinctInputUrls') {
-		const { results, success } = await env.DB.prepare('select distinct InputUrl from ByInputUrl;').all();
-		if (success) {
+		const results = await _distinctInputUrls(env);
+		if (results) {
 			return (
 				`
 				<div id="distinctInputUrls">
 				<div id="distinctInputUrls-div">
 				<h2>${results.length} distinct input images</h2>` +
 				results
-					.reverse()
 					.map(
 						({ InputUrl }, i) =>
 							`<form id="distinctInputUrls-form-${i}">` +
@@ -200,6 +243,7 @@ export default {
 			.get('/q/:qName', query.bind(null, env))
 			.get('/q/imageGenStats', imageGenStats.bind(null, env))
 			.post('/q/distinctInputUrl', distinctInputUrl.bind(null, env))
+			.get('/q/findChains', findChains.bind(null, env))
 			.all('*', () => error(404));
 
 		const ourError = (...args) => {

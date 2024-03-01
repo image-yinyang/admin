@@ -131,7 +131,7 @@ async function findChains(env, request) {
 		}
 	}
 
-	console.log('findChaings done!')
+	console.log('findChaings done!');
 	return JSON.stringify({ uniqueOutputs, ourInputs });
 }
 

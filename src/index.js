@@ -171,7 +171,7 @@ async function findChains(env, request) {
 
 		urlChains = Object.entries(reqIdMap)
 			.map(([_, req]) => findChain(req))
-			.filter((chain) => chain.length > 0)
+			.filter((chain) => chain.length > 1)
 			// TODO: need to filter the chains that are just sub-chains of longer ones!
 			.map((chain) => chain.map((reqId) => [reqId, reqIdMap[reqId].input.originalUrl]));
 	}

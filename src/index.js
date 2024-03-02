@@ -26,7 +26,7 @@ async function _distinctInputUrls(env) {
 async function _countRequests(env) {
 	const { results, success } = await env.DB.prepare('select count(distinct RequestId) from ByInputUrl;').all();
 	if (success) {
-		return results;
+		return results; //Object.values(results)[0];
 	}
 	return null;
 }
@@ -112,13 +112,18 @@ async function distinctInputUrl(env, request) {
 
 async function findChains(env, request) {
 	logWithCfInfo(request, 'findChains');
+	const numCurRequests = await _countRequests(env);
+	console.log(`numCurRequests=`);
+	console.log(numCurRequests);
 	const allRequests = await _allRequests(env);
 	const reqIdSet = new Set();
 	const reqIdMap = {};
 	const ourInputs = {};
+	let chains = [];
+	let urlChains = [];
 
 	if (allRequests) {
-		// serialize
+		// serialize the KV store lookups
 		for (const { InputUrl, RequestId } of allRequests) {
 			const req = await JSON.parse(await env.RequestsKVStore.get(RequestId));
 			if (!req) {
@@ -129,6 +134,7 @@ async function findChains(env, request) {
 			// account for all of them in the set, as it is used to check for existence
 			reqIdSet.add(RequestId);
 
+			// only records with .originalUrl are usable for chain search
 			if (!req?.input?.originalUrl) {
 				continue;
 			}
@@ -137,6 +143,7 @@ async function findChains(env, request) {
 			reqIdMap[RequestId] = { input, requestId, results };
 		}
 
+		// identify parents
 		for (const [RequestId, req] of Object.entries(reqIdMap)) {
 			const ogUrl = new URL(req?.input?.originalUrl);
 			if (ogUrl.origin === IMG_HOST) {
@@ -146,38 +153,44 @@ async function findChains(env, request) {
 					if (req.yinyangParent) {
 						console.error(`${req} already has parent?!`, req);
 					}
+
+					// wait: just do this in public, when the request is made!!
 					req.yinyangParent = { RequestId: reqId, type };
 					ourInputs[RequestId] = req;
 				}
 			}
 		}
-	}
-	/*
 
-			if (InputUrl.indexOf(IMG_HOST) === 0 || InputUrl.indexOf(INPUTS_HOST) === 0) {
-				if (!ourInputs[InputUrl]) {
-					ourInputs[InputUrl] = [];
-				}
+		// find chains
+		function findChain(request, chainList = []) {
+			chainList.unshift(request.requestId);
 
-				ourInputs[InputUrl].push(RequestId);
+			if (request.yinyangParent) {
+				return findChain(reqIdMap[request.yinyangParent.RequestId], chainList);
 			}
 
-			const _uoCheck = (which) => {
-				if (!uniqueOutputs[results[which].imageBucketId]) {
-					uniqueOutputs[results[which].imageBucketId] = [];
-				}
-
-				uniqueOutputs[results[which].imageBucketId].push([RequestId, which]);
-			};
-
-			_uoCheck('good');
-			_uoCheck('bad');
+			return chainList;
 		}
-	}
-	*/
 
-	console.log('findChaings done!');
-	return JSON.stringify({ reqIdMap, ourInputs });
+		chains = Object.entries(reqIdMap)
+			.map(([_, req]) => findChain(req))
+			.filter((chain) => chain.length > 0);
+		// TODO: need to filter the chains that are just sub-chains of longer ones!
+
+		urlChains = chains.map((chain) => chain.map((reqId) => [reqId, reqIdMap[reqId].input.originalUrl]));
+	}
+
+	let htmlOutStr = '';
+	for (const chain of urlChains) {
+		for (const [reqId, imageUrl] of chain) {
+			htmlOutStr += `<a href="${MAIN_HOST}?req=${reqId}"><image width=64 src="${imageUrl}" /></a>`;
+		}
+
+		htmlOutStr += '<br/><hr/><br/>';
+	}
+
+	console.log('findChains done!');
+	return htmlOutStr + '\n<!--\n' + JSON.stringify({ reqIdMap, ourInputs, chains, urlChains }) + '\n-->\n';
 }
 
 // unique reqIds with either/or failure:

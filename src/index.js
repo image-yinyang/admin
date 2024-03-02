@@ -26,7 +26,7 @@ async function _distinctInputUrls(env) {
 async function _countRequests(env) {
 	const { results, success } = await env.DB.prepare('select count(distinct RequestId) from ByInputUrl;').all();
 	if (success) {
-		return results; //Object.values(results)[0];
+		return Object.values(results[0])[0];
 	}
 	return null;
 }
@@ -118,8 +118,6 @@ async function findChains(env, request) {
 	const allRequests = await _allRequests(env);
 	const reqIdSet = new Set();
 	const reqIdMap = {};
-	const ourInputs = {};
-	let chains = [];
 	let urlChains = [];
 
 	if (allRequests) {
@@ -156,7 +154,6 @@ async function findChains(env, request) {
 
 					// wait: just do this in public, when the request is made!!
 					req.yinyangParent = { RequestId: reqId, type };
-					ourInputs[RequestId] = req;
 				}
 			}
 		}
@@ -172,12 +169,11 @@ async function findChains(env, request) {
 			return chainList;
 		}
 
-		chains = Object.entries(reqIdMap)
+		urlChains = Object.entries(reqIdMap)
 			.map(([_, req]) => findChain(req))
-			.filter((chain) => chain.length > 0);
-		// TODO: need to filter the chains that are just sub-chains of longer ones!
-
-		urlChains = chains.map((chain) => chain.map((reqId) => [reqId, reqIdMap[reqId].input.originalUrl]));
+			.filter((chain) => chain.length > 0)
+			// TODO: need to filter the chains that are just sub-chains of longer ones!
+			.map((chain) => chain.map((reqId) => [reqId, reqIdMap[reqId].input.originalUrl]));
 	}
 
 	let htmlOutStr = '';
@@ -190,7 +186,7 @@ async function findChains(env, request) {
 	}
 
 	console.log('findChains done!');
-	return htmlOutStr + '\n<!--\n' + JSON.stringify({ reqIdMap, ourInputs, chains, urlChains }) + '\n-->\n';
+	return htmlOutStr + '\n<!--\n' + JSON.stringify({ reqIdMap, urlChains }) + '\n-->\n';
 }
 
 // unique reqIds with either/or failure:

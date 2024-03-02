@@ -176,7 +176,7 @@ async function findChains(env, request) {
 			.map((chain) => chain.map((reqId) => [reqId, reqIdMap[reqId].input.originalUrl]));
 	}
 
-	let htmlOutStr = '';
+	let htmlOutStr = '<h3>All Unique Generation Chains</h3>';
 	for (const chain of urlChains) {
 		for (const [reqId, imageUrl] of chain) {
 			htmlOutStr += `<a href="${MAIN_HOST}?req=${reqId}"><image width=64 src="${imageUrl}" /></a>`;

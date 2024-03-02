@@ -15,6 +15,23 @@ const IMG_HOST = 'https://images.yinyang.computerpho.be';
 const INPUTS_HOST = 'https://inputs.yinyang.computerpho.be';
 
 async function _distinctInputUrls(env) {
+	const { results, success } = await env.DB.prepare('select distinct InputUrl from ByInputUrl;').all();
+	if (success) {
+		return results.reverse();
+	}
+
+	return null;
+}
+
+async function _countRequests(env) {
+	const { results, success } = await env.DB.prepare('select count(distinct RequestId) from ByInputUrl;').all();
+	if (success) {
+		return results;
+	}
+	return null;
+}
+
+async function _allRequests(env) {
 	const { results, success } = await env.DB.prepare('select distinct InputUrl, RequestId from ByInputUrl;').all();
 	if (success) {
 		return results.reverse();
@@ -95,20 +112,47 @@ async function distinctInputUrl(env, request) {
 
 async function findChains(env, request) {
 	logWithCfInfo(request, 'findChains');
-	const inputUrls = await _distinctInputUrls(env);
-	const uniqueOutputs = {};
+	const allRequests = await _allRequests(env);
+	const reqIdSet = new Set();
+	const reqIdMap = {};
 	const ourInputs = {};
 
-	if (inputUrls) {
+	if (allRequests) {
 		// serialize
-		for (const { InputUrl, RequestId } of inputUrls) {
-			inputUrls[RequestId] = await JSON.parse(await env.RequestsKVStore.get(RequestId));
-			if (!inputUrls[RequestId]) {
+		for (const { InputUrl, RequestId } of allRequests) {
+			const req = await JSON.parse(await env.RequestsKVStore.get(RequestId));
+			if (!req) {
 				console.error(`Request ${RequestId} not found!?`);
 				continue;
 			}
 
-			const { results } = inputUrls[RequestId];
+			// account for all of them in the set, as it is used to check for existence
+			reqIdSet.add(RequestId);
+
+			if (!req?.input?.originalUrl) {
+				continue;
+			}
+
+			const { input, requestId, results } = req;
+			reqIdMap[RequestId] = { input, requestId, results };
+		}
+
+		for (const [RequestId, req] of Object.entries(reqIdMap)) {
+			const ogUrl = new URL(req?.input?.originalUrl);
+			if (ogUrl.origin === IMG_HOST) {
+				const [reqId, type, ext] = ogUrl.pathname.slice(1).split('.');
+
+				if (reqIdSet.has(reqId)) {
+					if (req.yinyangParent) {
+						console.error(`${req} already has parent?!`, req);
+					}
+					req.yinyangParent = { RequestId: reqId, type };
+					ourInputs[RequestId] = req;
+				}
+			}
+		}
+	}
+	/*
 
 			if (InputUrl.indexOf(IMG_HOST) === 0 || InputUrl.indexOf(INPUTS_HOST) === 0) {
 				if (!ourInputs[InputUrl]) {
@@ -130,9 +174,10 @@ async function findChains(env, request) {
 			_uoCheck('bad');
 		}
 	}
+	*/
 
 	console.log('findChaings done!');
-	return JSON.stringify({ uniqueOutputs, ourInputs });
+	return JSON.stringify({ reqIdMap, ourInputs });
 }
 
 // unique reqIds with either/or failure:
